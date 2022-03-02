@@ -1,2 +1,2 @@
-# Replication_TreePathInTransformer
+# Replication_StochasticPositionalEncoding
 This is a replication repository for the seminar work for "Data Mining"
