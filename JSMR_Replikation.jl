@@ -4,16 +4,58 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ 5194addf-8bcf-494f-8e9b-c56863178653
-using PyCall #der direktere Weg
+# This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
+macro bind(def, element)
+    quote
+        local iv = try Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value catch; b -> missing; end
+        local el = $(esc(element))
+        global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : iv(el)
+        el
+    end
+end
 
 # ╔═╡ 9eed29c8-2b42-4e76-8951-5632c2de8c15
+using HypertextLiteral
 
+# ╔═╡ 07ce5c31-bd34-4387-a2f4-356e7066ebe5
+using PyCall #instead of "using Pickle"
 
-# ╔═╡ ece45920-9590-11ec-15f1-6b25283127aa
-#using Pickle
+# ╔═╡ cdf98e75-65ae-4f57-a5ca-f73aff5e578b
+md""" # Replication of -Stochastic Positional Encoding- 
+## Data Mining
+### Josefine Selke & Matthias Reimers """
 
-# ╔═╡ 487e6c59-8e10-46d0-ac0e-72d0c2a2b203
+# ╔═╡ aaab449c-b04f-4c17-b25f-2befddd79522
+md"""#### To change cell width 
+https://discourse.julialang.org/t/cell-width-in-pluto-notebook/49761/4"""
+
+# ╔═╡ 2de65426-e7e4-4134-8357-a60718366721
+@bind screenWidth @htl("""
+	<div>
+	<script>
+		var div = currentScript.parentElement
+		div.value = screen.width
+	</script>
+	</div>
+""")
+
+# ╔═╡ 28bd0e59-3b97-4d5f-83f0-c7aa5e30ed72
+begin
+	cellWidth= min(1000, screenWidth*0.9)
+	@htl("""
+		<style>
+			pluto-notebook {
+				margin: auto;
+				width: $(cellWidth)px;
+			}
+		</style>
+	""")
+end
+
+# ╔═╡ c6a4ed19-d693-4d79-83bc-3fd40b3cb622
+md"""#### Pretesting: Loading Python Pickles"""
+
+# ╔═╡ 24961868-d2d3-44d0-aec1-6528a633f933
 ## source: https://stackoverflow.com/questions/65720584/how-to-load-python-pickle-from-julia
 begin
 py"""
@@ -28,22 +70,23 @@ def load_pickle(fpath):
 load_pickle = py"load_pickle"
 end
 
-# ╔═╡ c8b3ea68-fcc7-478b-898a-e6bceadb4ac3
-#then use
+# ╔═╡ 3e2e678f-2ab6-4f46-b0f6-cd765494342a
+load_pickle("example.pkl") #from https://zenodo.org/record/4782721/files/remi_dataset.tar.gz?download=1
 
-# ╔═╡ 94122143-253a-4e66-bb64-1cd33a9299de
-load_pickle("1.pkl")
+# ╔═╡ 614ab61b-a610-4989-baba-ef06c05087c2
+md"""Loads pickle Files into Julia Dict(s) which have a semi-intuitive structure"""
 
-# ╔═╡ ce1e419f-63e3-4c09-9a61-8e23715c77de
-#and it should load into a Julia Dict
-## Ende stackoverflow how to load pickle
+# ╔═╡ d8cd5510-f8e5-4ca7-adda-ee13ae96635f
+
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+HypertextLiteral = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 
 [compat]
+HypertextLiteral = "~0.9.3"
 PyCall = "~1.93.0"
 """
 
@@ -77,6 +120,11 @@ uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
 [[Downloads]]
 deps = ["ArgTools", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+
+[[HypertextLiteral]]
+git-tree-sha1 = "2b078b5a615c6c0396c77810d92ee8c6f470d238"
+uuid = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
+version = "0.9.3"
 
 [[JSON]]
 deps = ["Dates", "Mmap", "Parsers", "Unicode"]
@@ -178,12 +226,16 @@ uuid = "8e850ede-7688-5339-a07c-302acd2aaf8d"
 """
 
 # ╔═╡ Cell order:
+# ╠═cdf98e75-65ae-4f57-a5ca-f73aff5e578b
+# ╠═aaab449c-b04f-4c17-b25f-2befddd79522
 # ╠═9eed29c8-2b42-4e76-8951-5632c2de8c15
-# ╠═ece45920-9590-11ec-15f1-6b25283127aa
-# ╠═5194addf-8bcf-494f-8e9b-c56863178653
-# ╠═487e6c59-8e10-46d0-ac0e-72d0c2a2b203
-# ╠═c8b3ea68-fcc7-478b-898a-e6bceadb4ac3
-# ╠═94122143-253a-4e66-bb64-1cd33a9299de
-# ╠═ce1e419f-63e3-4c09-9a61-8e23715c77de
+# ╠═2de65426-e7e4-4134-8357-a60718366721
+# ╠═28bd0e59-3b97-4d5f-83f0-c7aa5e30ed72
+# ╠═c6a4ed19-d693-4d79-83bc-3fd40b3cb622
+# ╠═07ce5c31-bd34-4387-a2f4-356e7066ebe5
+# ╠═24961868-d2d3-44d0-aec1-6528a633f933
+# ╠═3e2e678f-2ab6-4f46-b0f6-cd765494342a
+# ╠═614ab61b-a610-4989-baba-ef06c05087c2
+# ╠═d8cd5510-f8e5-4ca7-adda-ee13ae96635f
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
