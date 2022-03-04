@@ -24,6 +24,7 @@ using PyCall #instead of "using Pickle"
 begin
 	using YAML
 	using Flux
+	using CUDA
 end
 
 # ╔═╡ cdf98e75-65ae-4f57-a5ca-f73aff5e578b
@@ -85,24 +86,59 @@ md"""Loads pickle Files into Julia Dict(s) which have a semi-intuitive structure
 # ╔═╡ 85958adf-382a-4cff-905d-d74eaba98e7f
 md"""### Simply trying to transfer train.py into Julia"""
 
+# ╔═╡ d9bf912b-2343-4cc2-bdb2-4a8f6563e1d3
+md"""The following sections will be tidied up nice and neat once the early testing is done"""
+
 # ╔═╡ c1b5def1-19ec-4b31-a4ce-3b2b45f6039c
 train_conf_path = "experiments/pop_piano/configs/train/sinespe_default.yaml"
 
 # ╔═╡ 86e1695b-ae55-49d6-8a40-fa5688227a18
 train_conf = YAML.load_file(train_conf_path) #theres also YAML.load_all which creates an iterator for all YAML documents in the file, but it seems there's only one such file in there, so this should suffice.
 
-# ╔═╡ 9935418f-2ecb-48f9-9f6b-7eb5389d921f
+# ╔═╡ 039de70e-e8cd-477e-8fc2-b99ac646564d
+train_steps = 0
 
+# ╔═╡ 35095a68-c3b9-4232-bd72-312a84d860e3
+train_conf_ = train_actual_config = train_conf["training"] # I really, REALLY don't like how it's only a single underscore in the first variable name. To replace it but avoid stupid mistakes i'll go with two variable names as Status Quo for now...
+
+# ╔═╡ 8ad572d4-6074-4bfc-a508-f1cde7cfa652
+gpuid = train_actual_config["gpuid"] #this might not be needed as...
+
+# ╔═╡ f3840e87-e780-44f8-a693-559bc6a5d9a0
+#... there seems to be no "set_device" in Julia CUDA
+
+# ╔═╡ 9cb9338c-b3a0-4263-abf8-93e6088a5e2c
+#a whole bunch of config values retrieved from the yaml file. I despicably copy-pasted this from of the original train.py with minor alterations.
+begin
+warmup_steps = train_actual_config["warmup_steps"]
+max_lr = train_actual_config["lr"]
+min_lr = train_actual_config["lr_scheduler"]["eta_min"]
+lr_decay_steps = train_actual_config["lr_scheduler"]["T_max"]
+redraw_prob = train_actual_config["feat_redraw_prob"]
+max_epochs = train_actual_config["num_epochs"]
+batch_size = train_conf["data_loader"]["batch_size"]
+train_split = train_conf["data_loader"]["train_split"]
+val_split = train_conf["data_loader"]["val_split"]
+
+ckpt_dir = train_actual_config["ckpt_dir"]
+pretrained_param_path = train_actual_config["trained_params"]
+pretrained_optimizer_path = train_actual_config["trained_optim"]
+ckpt_interval = train_actual_config["ckpt_interval"]
+val_interval = 1
+log_interval = train_actual_config["log_interval"]
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 HypertextLiteral = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [compat]
+CUDA = "~3.8.3"
 Flux = "~0.12.9"
 HypertextLiteral = "~0.9.3"
 PyCall = "~1.93.0"
@@ -704,9 +740,14 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═3e2e678f-2ab6-4f46-b0f6-cd765494342a
 # ╠═614ab61b-a610-4989-baba-ef06c05087c2
 # ╠═85958adf-382a-4cff-905d-d74eaba98e7f
+# ╠═d9bf912b-2343-4cc2-bdb2-4a8f6563e1d3
 # ╠═8355a74c-de2c-423f-9603-1daae76ed832
 # ╠═c1b5def1-19ec-4b31-a4ce-3b2b45f6039c
 # ╠═86e1695b-ae55-49d6-8a40-fa5688227a18
-# ╠═9935418f-2ecb-48f9-9f6b-7eb5389d921f
+# ╠═039de70e-e8cd-477e-8fc2-b99ac646564d
+# ╠═35095a68-c3b9-4232-bd72-312a84d860e3
+# ╠═8ad572d4-6074-4bfc-a508-f1cde7cfa652
+# ╠═f3840e87-e780-44f8-a693-559bc6a5d9a0
+# ╠═9cb9338c-b3a0-4263-abf8-93e6088a5e2c
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
