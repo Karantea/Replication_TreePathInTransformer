@@ -27,6 +27,9 @@ begin
 	using CUDA
 end
 
+# ╔═╡ a9001bb5-8bca-4923-9f0e-aa7faa2c8e9b
+using Formatting #to be able to use the {:bla} placeholders
+
 # ╔═╡ cdf98e75-65ae-4f57-a5ca-f73aff5e578b
 md""" # Replication of -Stochastic Positional Encoding- 
 ## Data Mining
@@ -128,11 +131,32 @@ val_interval = 1
 log_interval = train_actual_config["log_interval"]
 end
 
+# ╔═╡ f5fca992-9a52-42ed-a016-55e29b38f331
+function log_epoch(log_file, log_data, is_init=False)
+	if is_init
+		open(log_file, "w") do f #does the "do" do the same thing as "with" in Python?
+		write(f, format("{:4} {:8} {:12} {:12}\n","ep", "steps", "recons_loss", "ep_time")) 
+		end
+	end
+	open(log_file, "a") do f
+		write(f, format("{:<4} {:<8} {:<12} {:<12}\n",
+      log_data["ep"], log_data["steps"], round(log_data["recons_loss"], 5), round(log_data["time"], 2)))
+	end
+end
+
+
+# ╔═╡ e8516430-a171-4a9b-8fbb-982fa8583d02
+md""" ## Not sure if the formatting stuff works properly. Todo: Disassemble above function and test that!!!"""
+
+# ╔═╡ 5c7824d0-14e3-47fc-9c4c-56bd5ba8ce7b
+format("{:1} bla", 2)
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+Formatting = "59287772-0a20-5a39-b81b-1366585eb4c0"
 HypertextLiteral = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
@@ -140,6 +164,7 @@ YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 [compat]
 CUDA = "~3.8.3"
 Flux = "~0.12.9"
+Formatting = "~0.4.2"
 HypertextLiteral = "~0.9.3"
 PyCall = "~1.93.0"
 YAML = "~0.4.7"
@@ -323,6 +348,12 @@ deps = ["AbstractTrees", "Adapt", "ArrayInterface", "CUDA", "CodecZlib", "Colors
 git-tree-sha1 = "983271b47332fd3d9488d6f2d724570290971794"
 uuid = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 version = "0.12.9"
+
+[[Formatting]]
+deps = ["Printf"]
+git-tree-sha1 = "8339d61043228fdd3eb658d86c926cb282ae72a8"
+uuid = "59287772-0a20-5a39-b81b-1366585eb4c0"
+version = "0.4.2"
 
 [[ForwardDiff]]
 deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "LogExpFunctions", "NaNMath", "Preferences", "Printf", "Random", "SpecialFunctions", "StaticArrays"]
@@ -749,5 +780,9 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═8ad572d4-6074-4bfc-a508-f1cde7cfa652
 # ╠═f3840e87-e780-44f8-a693-559bc6a5d9a0
 # ╠═9cb9338c-b3a0-4263-abf8-93e6088a5e2c
+# ╠═a9001bb5-8bca-4923-9f0e-aa7faa2c8e9b
+# ╠═f5fca992-9a52-42ed-a016-55e29b38f331
+# ╠═e8516430-a171-4a9b-8fbb-982fa8583d02
+# ╠═5c7824d0-14e3-47fc-9c4c-56bd5ba8ce7b
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
