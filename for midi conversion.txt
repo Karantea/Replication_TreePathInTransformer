@@ -1,0 +1,5 @@
+convert2midi.py has event_to_midi which has a dump command - probably creates Midi file
+event_to_midi is called by inference.py putting in "song"
+song is the first return val from generate_fast from generate_utils
+generate_fast seems to be the right thing. 
+code contains stuff that looks a lot like it depends on the trained model... maybe its too hard to extract the conversion routine
