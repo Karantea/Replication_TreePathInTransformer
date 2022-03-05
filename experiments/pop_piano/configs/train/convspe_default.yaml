@@ -1,7 +1,7 @@
 data_loader:
   batch_size:       4
-  train_split:      ./pickles/train_pieces.pkl
-  val_split:        ./pickles/val_pieces.pkl
+  train_split:      ./experiments/pop_piano/pickles/train_pieces.pkl
+  val_split:        ./experiments/pop_piano/pickles/val_pieces.pkl
   max_bars:         48
   
 model:
