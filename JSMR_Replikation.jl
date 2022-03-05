@@ -18,17 +18,18 @@ end
 using HypertextLiteral
 
 # ╔═╡ 07ce5c31-bd34-4387-a2f4-356e7066ebe5
-using PyCall #instead of "using Pickle"
+using PyCall #instead of "using Pickle" which is a premade package
 
 # ╔═╡ 8355a74c-de2c-423f-9603-1daae76ed832
 begin
 	using YAML
 	using Flux
 	using CUDA
+	using Transformers #ArgumentError: Package Transformers not found in current path: - Run `import Pkg; Pkg.add("Transformers")` to install the Transformers package. - Well... let's do that
 end
 
 # ╔═╡ a9001bb5-8bca-4923-9f0e-aa7faa2c8e9b
-using Formatting #to be able to use the {:bla} placeholders
+using Formatting #to be able to use the {:bla} placeholders from Python in the following function
 
 # ╔═╡ cdf98e75-65ae-4f57-a5ca-f73aff5e578b
 md""" # Replication of -Stochastic Positional Encoding- 
@@ -38,6 +39,9 @@ md""" # Replication of -Stochastic Positional Encoding-
 # ╔═╡ aaab449c-b04f-4c17-b25f-2befddd79522
 md"""#### To change cell width 
 https://discourse.julialang.org/t/cell-width-in-pluto-notebook/49761/4"""
+
+# ╔═╡ b5b9371d-dc2e-48e7-8ecd-796e27b551f1
+md"""This really shines, when zooming in a bit"""
 
 # ╔═╡ 2de65426-e7e4-4134-8357-a60718366721
 @bind screenWidth @htl("""
@@ -132,6 +136,7 @@ log_interval = train_actual_config["log_interval"]
 end
 
 # ╔═╡ f5fca992-9a52-42ed-a016-55e29b38f331
+#epoch logging?!... probably recording some numbers for each epoch...?
 function log_epoch(log_file, log_data, is_init=False)
 	if is_init
 		open(log_file, "w") do f #does the "do" do the same thing as "with" in Python?
@@ -151,6 +156,209 @@ md""" ## Not sure if the formatting stuff works properly. Todo: Disassemble abov
 # ╔═╡ 5c7824d0-14e3-47fc-9c4c-56bd5ba8ce7b
 format("{:1} bla", 2)
 
+# ╔═╡ ae902061-d831-4059-ba9e-7319d6370b9d
+md"""___________________________________________________________________________________________________"""
+
+# ╔═╡ 65e0d912-a36f-45d9-8f5f-741e3a9b7668
+md"""### Plugging in REMIFullSongTransformerDataset (class)"""
+
+# ╔═╡ f0949588-8119-4871-9b11-b15f50c594ba
+md"""We noticed that there is quite complex pre-processing of the data carried out by the REMIFullSongTransformerDataset class from dataloader.py. As this doesn't really have anything to do with replicating the Transformer architecture, we want to run this whole thing in Python (original author's code), receive the resulting complex object in Julia and transfer all the data hiding in those attributes to a Julia object. """
+
+# ╔═╡ f01df3af-a39d-4e92-af73-b6266a04006c
+py"""
+import os, pickle, random
+from glob import glob
+
+#import torch #trying to bluntly exclude the methods that depend on this
+import numpy as np
+import pandas as pd
+
+from torch.utils.data import Dataset, DataLoader
+
+IDX_TO_KEY = {
+  0: 'A',
+  1: 'A#',
+  2: 'B',
+  3: 'C',
+  4: 'C#',
+  5: 'D',
+  6: 'D#',
+  7: 'E',
+  8: 'F',
+  9: 'F#',
+  10: 'G',
+  11: 'G#'
+}
+KEY_TO_IDX = {
+  v:k for k, v in IDX_TO_KEY.items()
+}
+
+def get_chord_tone(chord_event):
+  tone = chord_event['value'].split('_')[0]
+  return tone
+
+def transpose_chord(chord_event, n_keys):
+  if chord_event['value'] == 'N_N':
+    return chord_event
+
+  orig_tone = get_chord_tone(chord_event)
+  orig_tone_idx = KEY_TO_IDX[orig_tone]
+  new_tone_idx = (orig_tone_idx + 12 + n_keys) % 12
+  new_chord_value = chord_event['value'].replace(
+    '{}_'.format(orig_tone), '{}_'.format(IDX_TO_KEY[new_tone_idx])
+  )
+  new_chord_event = {'name': chord_event['name'], 'value': new_chord_value}
+
+  return new_chord_event
+
+def check_extreme_pitch(raw_events):
+  low, high = 128, 0
+  for ev in raw_events:
+    if ev['name'] == 'Note_Pitch':
+      low = min(low, int(ev['value']))
+      high = max(high, int(ev['value']))
+
+  return low, high
+
+def transpose_events(raw_events, n_keys):
+  transposed_raw_events = []
+
+  for ev in raw_events:
+    if ev['name'] == 'Note_Pitch':
+      transposed_raw_events.append(
+        {'name': ev['name'], 'value': ev['value'] + n_keys}
+      )
+    elif ev['name'] == 'Chord':
+      transposed_raw_events.append(
+        transpose_chord(ev, n_keys)
+      )
+    else:
+      transposed_raw_events.append(ev)
+
+  assert len(transposed_raw_events) == len(raw_events)
+  return transposed_raw_events
+
+def pickle_load(path):
+  return pickle.load(open(path, 'rb'))
+
+def convert_event(event_seq, event2idx, to_ndarr=True):
+  if isinstance(event_seq[0], dict):
+    event_seq = [event2idx['{}_{}'.format(e['name'], e['value'])] for e in event_seq]
+  else:
+    event_seq = [event2idx[e] for e in event_seq]
+
+  if to_ndarr:
+    return np.array(event_seq)
+  else:
+    return event_seq
+
+class REMIFullSongTransformerDataset(Dataset):
+  def __init__(self, data_dir, vocab_file, 
+               model_dec_seqlen=2048, model_max_bars=32,
+               pieces=[], do_augment=True, augment_range=range(-6, 7), 
+               min_pitch=22, max_pitch=107, pad_to_same=True,
+               appoint_st_bar=None, dec_end_pad_value=None):
+    self.vocab_file = vocab_file
+    self.read_vocab()
+
+    self.data_dir = data_dir
+    self.pieces = pieces
+    self.build_dataset()
+
+    self.model_dec_seqlen = model_dec_seqlen
+    self.model_max_bars = model_max_bars
+
+    self.do_augment = do_augment
+    self.augment_range = augment_range
+    self.min_pitch, self.max_pitch = min_pitch, max_pitch
+    self.pad_to_same = pad_to_same
+
+    self.appoint_st_bar = appoint_st_bar
+    if dec_end_pad_value == 'EOS':
+      self.dec_end_pad_value = self.eos_token
+    else:
+      self.dec_end_pad_value = self.pad_token
+
+  def read_vocab(self):
+    vocab = pickle_load(self.vocab_file)[0]
+    self.idx2event = pickle_load(self.vocab_file)[1]
+    orig_vocab_size = len(vocab)
+    self.event2idx = vocab
+    self.bar_token = self.event2idx['Bar_None']
+    self.eos_token = self.event2idx['EOS_None']
+    self.pad_token = orig_vocab_size
+    self.vocab_size = self.pad_token + 1
+  
+  def build_dataset(self):
+    if not self.pieces:
+      self.pieces = sorted( glob(os.path.join(self.data_dir, '*.pkl')) )
+    else:
+      self.pieces = sorted( [os.path.join(self.data_dir, p) for p in self.pieces] )
+
+    self.piece_bar_pos = []
+
+    for i, p in enumerate(self.pieces):
+      bar_pos, p_evs = pickle_load(p)
+      if not i % 200:
+        print ('[preparing data] now at #{}'.format(i))
+      if bar_pos[-1] == len(p_evs):
+        print ('piece {}, got appended bar markers'.format(p))
+        bar_pos = bar_pos[:-1]
+      if len(p_evs) - bar_pos[-1] == 2: # remove empty trailing bar
+        bar_pos = bar_pos[:-1]
+
+      bar_pos.append(len(p_evs))
+
+      self.piece_bar_pos.append(bar_pos)
+
+  def get_sample_from_file(self, piece_idx):
+    # Samples `self.model_max_bars` bars of music from each piece every epoch
+    piece_evs = pickle_load(self.pieces[piece_idx])[1]
+    if len(self.piece_bar_pos[piece_idx]) > self.model_max_bars and self.appoint_st_bar is None:
+      picked_st_bar = random.choice(
+        range(len(self.piece_bar_pos[piece_idx]) - self.model_max_bars)
+      )
+    elif self.appoint_st_bar is not None and self.appoint_st_bar < len(self.piece_bar_pos[piece_idx]) - self.model_max_bars:
+      picked_st_bar = self.appoint_st_bar
+    else:
+      picked_st_bar = 0
+
+    piece_bar_pos = self.piece_bar_pos[piece_idx]
+
+    if len(piece_bar_pos) > self.model_max_bars:
+      piece_evs = piece_evs[ piece_bar_pos[picked_st_bar] : piece_bar_pos[picked_st_bar + self.model_max_bars] ]
+      picked_bar_pos = np.array(piece_bar_pos[ picked_st_bar : picked_st_bar + self.model_max_bars ]) - piece_bar_pos[picked_st_bar]
+      n_bars = self.model_max_bars
+    else:
+      picked_bar_pos = np.array(piece_bar_pos + [piece_bar_pos[-1]] * (self.model_max_bars - len(piece_bar_pos)))
+      n_bars = len(piece_bar_pos)
+      assert len(picked_bar_pos) == self.model_max_bars
+
+    return piece_evs, picked_st_bar, picked_bar_pos, n_bars
+
+  def pad_sequence(self, seq, maxlen, pad_value=None):
+    if pad_value is None:
+      pad_value = self.pad_token
+
+    seq.extend( [pad_value for _ in range(maxlen- len(seq))] )
+
+    return seq
+
+  def pitch_augment(self, bar_events):
+    bar_min_pitch, bar_max_pitch = check_extreme_pitch(bar_events)
+    
+    n_keys = random.choice(self.augment_range)
+    while bar_min_pitch + n_keys < self.min_pitch or bar_max_pitch + n_keys > self.max_pitch:
+      n_keys = random.choice(self.augment_range)
+
+    augmented_bar_events = transpose_events(bar_events, n_keys)
+    return augmented_bar_events
+"""
+
+# ╔═╡ 935e6d49-638f-405b-af46-d604262eb3e5
+
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -159,6 +367,7 @@ Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 Formatting = "59287772-0a20-5a39-b81b-1366585eb4c0"
 HypertextLiteral = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
+Transformers = "21ca0261-441d-5938-ace7-c90938fde4d4"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [compat]
@@ -167,6 +376,7 @@ Flux = "~0.12.9"
 Formatting = "~0.4.2"
 HypertextLiteral = "~0.9.3"
 PyCall = "~1.93.0"
+Transformers = "~0.1.15"
 YAML = "~0.4.7"
 """
 
@@ -209,8 +419,25 @@ git-tree-sha1 = "a598ecb0d717092b5539dbbe890c98bac842b072"
 uuid = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
 version = "0.2.0"
 
+[[BSON]]
+git-tree-sha1 = "306bb5574b0c1c56d7e1207581516c557d105cad"
+uuid = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
+version = "0.3.5"
+
 [[Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+
+[[BinaryProvider]]
+deps = ["Libdl", "Logging", "SHA"]
+git-tree-sha1 = "ecdec412a9abc8db54c0efc5548c64dfce072058"
+uuid = "b99e7846-7c00-51b0-8f62-c81ae34c0232"
+version = "0.5.10"
+
+[[BytePairEncoding]]
+deps = ["DelimitedFiles", "InternedStrings", "WordTokenizers"]
+git-tree-sha1 = "f137186d052e97e98f6428f11698da50b984e131"
+uuid = "a4280ba5-8788-555a-8ca8-4a8c3d966a71"
+version = "0.2.0"
 
 [[CEnum]]
 git-tree-sha1 = "215a9aa4a1f23fbd05b92769fdd62559488d70e9"
@@ -286,6 +513,12 @@ git-tree-sha1 = "cc70b17275652eb47bc9e5f81635981f13cea5c8"
 uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
 version = "1.9.0"
 
+[[DataDeps]]
+deps = ["BinaryProvider", "HTTP", "Libdl", "Reexport", "SHA", "p7zip_jll"]
+git-tree-sha1 = "4f0e41ff461d42cfc62ff0de4f1cd44c6e6b3771"
+uuid = "124859b0-ceae-595e-8997-d05f6a7a8dfe"
+version = "0.7.7"
+
 [[DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
 git-tree-sha1 = "3daef5523dd2e769dad2365274f760ff5f282c7d"
@@ -330,6 +563,12 @@ uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 git-tree-sha1 = "56559bbef6ca5ea0c0818fa5c90320398a6fbf8d"
 uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
 version = "0.1.8"
+
+[[Fetch]]
+deps = ["Base64", "HTTP", "JSON3", "Random", "StructTypes"]
+git-tree-sha1 = "fedf42b831f6dd5605d33fd05199402009450afd"
+uuid = "bb354801-46f6-40b6-9c3d-d42d7a74c775"
+version = "0.1.3"
 
 [[FillArrays]]
 deps = ["LinearAlgebra", "Random", "SparseArrays", "Statistics"]
@@ -378,6 +617,18 @@ git-tree-sha1 = "647a54f196b5ffb7c3bc2fec5c9a57fa273354cc"
 uuid = "61eb1bfa-7361-4325-ad38-22787b887f55"
 version = "0.13.14"
 
+[[HTML_Entities]]
+deps = ["StrTables"]
+git-tree-sha1 = "c4144ed3bc5f67f595622ad03c0e39fa6c70ccc7"
+uuid = "7693890a-d069-55fe-a829-b4a6d304f0ee"
+version = "1.0.1"
+
+[[HTTP]]
+deps = ["Base64", "Dates", "IniFile", "Logging", "MbedTLS", "NetworkOptions", "Sockets", "URIs"]
+git-tree-sha1 = "0fa77022fe4b511826b39c894c90daf5fce3334a"
+uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+version = "0.9.17"
+
 [[HypertextLiteral]]
 git-tree-sha1 = "2b078b5a615c6c0396c77810d92ee8c6f470d238"
 uuid = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
@@ -394,9 +645,20 @@ git-tree-sha1 = "debdd00ffef04665ccbb3e150747a77560e8fad1"
 uuid = "615f187c-cbe4-4ef1-ba3b-2fcf58d6d173"
 version = "0.1.1"
 
+[[IniFile]]
+git-tree-sha1 = "f550e6e32074c939295eb5ea6de31849ac2c9625"
+uuid = "83e8ac13-25f8-5344-8a64-a9f2b223428f"
+version = "0.5.1"
+
 [[InteractiveUtils]]
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+
+[[InternedStrings]]
+deps = ["Random", "Test"]
+git-tree-sha1 = "eb05b5625bc5d821b8075a77e4c421933e20c76b"
+uuid = "7d512f48-7fb1-5a58-b986-67e6dc259f01"
+version = "0.7.0"
 
 [[InverseFunctions]]
 deps = ["Test"]
@@ -420,6 +682,12 @@ deps = ["Dates", "Mmap", "Parsers", "Unicode"]
 git-tree-sha1 = "3c837543ddb02250ef42f4738347454f95079d4e"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 version = "0.21.3"
+
+[[JSON3]]
+deps = ["Dates", "Mmap", "Parsers", "StructTypes", "UUIDs"]
+git-tree-sha1 = "7d58534ffb62cd947950b3aa9b993e63307a6125"
+uuid = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+version = "1.9.2"
 
 [[Juno]]
 deps = ["Base64", "Logging", "Media", "Profile"]
@@ -468,6 +736,12 @@ git-tree-sha1 = "42b62845d70a619f063a7da093d995ec8e15e778"
 uuid = "94ce4f54-9a6c-5748-9c1c-f9c7231a4531"
 version = "1.16.1+1"
 
+[[LightXML]]
+deps = ["Libdl", "XML2_jll"]
+git-tree-sha1 = "e129d9391168c677cd4800f5c0abb1ed8cb3794f"
+uuid = "9c8b4983-aa76-5018-a973-4c85ecc9e179"
+version = "0.9.0"
+
 [[LinearAlgebra]]
 deps = ["Libdl", "libblastrampoline_jll"]
 uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -490,6 +764,12 @@ version = "0.5.9"
 [[Markdown]]
 deps = ["Base64"]
 uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
+
+[[MbedTLS]]
+deps = ["Dates", "MbedTLS_jll", "Random", "Sockets"]
+git-tree-sha1 = "1c38e51c3d08ef2278062ebceade0e46cefc96fe"
+uuid = "739be429-bea8-5141-9913-cc70e7f3736d"
+version = "1.0.3"
 
 [[MbedTLS_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -558,6 +838,12 @@ git-tree-sha1 = "13468f237353112a01b2d6b32f3d0f80219944aa"
 uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
 version = "2.2.2"
 
+[[Pickle]]
+deps = ["DataStructures", "InternedStrings", "Serialization", "SparseArrays", "Strided", "StringEncodings", "ZipFile"]
+git-tree-sha1 = "de8165bc4d1c448824cefa98cd5cd281dc01d9b2"
+uuid = "fbb45041-c46e-462f-888f-7c521cafbc2c"
+version = "0.3.0"
+
 [[Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
@@ -567,6 +853,12 @@ deps = ["TOML"]
 git-tree-sha1 = "de893592a221142f3db370f48290e3a2ef39998f"
 uuid = "21216c6a-2e73-6563-6e65-726566657250"
 version = "1.2.4"
+
+[[PrimitiveOneHot]]
+deps = ["Adapt", "ChainRulesCore", "NNlib", "Requires"]
+git-tree-sha1 = "c7ec024684e81abec940e3434636bd5917304d58"
+uuid = "13d12f88-f12b-451e-9b9f-13b97e01cc85"
+version = "0.1.2"
 
 [[Printf]]
 deps = ["Unicode"]
@@ -676,11 +968,29 @@ git-tree-sha1 = "8977b17906b0a1cc74ab2e3a05faa16cf08a8291"
 uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 version = "0.33.16"
 
+[[StrTables]]
+deps = ["Dates"]
+git-tree-sha1 = "5998faae8c6308acc25c25896562a1e66a3bb038"
+uuid = "9700d1a9-a7c8-5760-9816-a99fda30bb8f"
+version = "1.0.1"
+
+[[Strided]]
+deps = ["LinearAlgebra", "TupleTools"]
+git-tree-sha1 = "4d581938087ca90eab9bd4bb6d270edaefd70dcd"
+uuid = "5e0ebb24-38b0-5f93-81fe-25c709ecae67"
+version = "1.1.2"
+
 [[StringEncodings]]
 deps = ["Libiconv_jll"]
 git-tree-sha1 = "50ccd5ddb00d19392577902f0079267a72c5ab04"
 uuid = "69024149-9ee7-55f6-a4c4-859efe599b68"
 version = "0.3.5"
+
+[[StructTypes]]
+deps = ["Dates", "UUIDs"]
+git-tree-sha1 = "d24a825a95a6d98c385001212dc9020d609f2d4f"
+uuid = "856f2bd8-1eba-4b0a-8007-ebc267875bd4"
+version = "1.8.1"
 
 [[TOML]]
 deps = ["Dates"]
@@ -706,6 +1016,22 @@ git-tree-sha1 = "216b95ea110b5972db65aa90f88d8d89dcb8851c"
 uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 version = "0.9.6"
 
+[[Transformers]]
+deps = ["AbstractTrees", "Adapt", "BSON", "BytePairEncoding", "CUDA", "ChainRulesCore", "DataDeps", "DataStructures", "Dates", "DelimitedFiles", "Fetch", "Flux", "Functors", "HTTP", "InternedStrings", "JSON", "LightXML", "LinearAlgebra", "MacroTools", "Markdown", "NNlib", "NNlibCUDA", "Pickle", "Pkg", "PrimitiveOneHot", "Random", "Requires", "SHA", "Statistics", "Unicode", "WordTokenizers", "ZipFile"]
+git-tree-sha1 = "1b7f17dc31d61311bbe3c7cf0dca77c9bf7906de"
+uuid = "21ca0261-441d-5938-ace7-c90938fde4d4"
+version = "0.1.15"
+
+[[TupleTools]]
+git-tree-sha1 = "3c712976c47707ff893cf6ba4354aa14db1d8938"
+uuid = "9d95972d-f1c8-5527-a6e0-b4b365fa01f6"
+version = "1.3.0"
+
+[[URIs]]
+git-tree-sha1 = "97bbe755a53fe859669cd907f2d96aee8d2c1355"
+uuid = "5c2747f8-b7ea-4ff2-ba2e-563bfd36b1d4"
+version = "1.3.0"
+
 [[UUIDs]]
 deps = ["Random", "SHA"]
 uuid = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
@@ -717,6 +1043,18 @@ uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 git-tree-sha1 = "58d6e80b4ee071f5efd07fda82cb9fbe17200868"
 uuid = "81def892-9a0e-5fdd-b105-ffc91e053289"
 version = "1.3.0"
+
+[[WordTokenizers]]
+deps = ["DataDeps", "HTML_Entities", "StrTables", "Unicode"]
+git-tree-sha1 = "01dd4068c638da2431269f49a5964bf42ff6c9d2"
+uuid = "796a5d58-b03d-544a-977e-18100b691f6e"
+version = "0.5.6"
+
+[[XML2_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "Zlib_jll"]
+git-tree-sha1 = "1acf5bdf07aa0907e0a37d3718bb88d4b687b74a"
+uuid = "02c8fc9c-b97f-50b9-bbe4-9be30ff0a78a"
+version = "2.9.12+0"
 
 [[YAML]]
 deps = ["Base64", "Dates", "Printf", "StringEncodings"]
@@ -762,6 +1100,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╔═╡ Cell order:
 # ╠═cdf98e75-65ae-4f57-a5ca-f73aff5e578b
 # ╟─aaab449c-b04f-4c17-b25f-2befddd79522
+# ╟─b5b9371d-dc2e-48e7-8ecd-796e27b551f1
 # ╟─9eed29c8-2b42-4e76-8951-5632c2de8c15
 # ╟─2de65426-e7e4-4134-8357-a60718366721
 # ╟─28bd0e59-3b97-4d5f-83f0-c7aa5e30ed72
@@ -784,5 +1123,10 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═f5fca992-9a52-42ed-a016-55e29b38f331
 # ╠═e8516430-a171-4a9b-8fbb-982fa8583d02
 # ╠═5c7824d0-14e3-47fc-9c4c-56bd5ba8ce7b
+# ╟─ae902061-d831-4059-ba9e-7319d6370b9d
+# ╟─65e0d912-a36f-45d9-8f5f-741e3a9b7668
+# ╟─f0949588-8119-4871-9b11-b15f50c594ba
+# ╠═f01df3af-a39d-4e92-af73-b6266a04006c
+# ╠═935e6d49-638f-405b-af46-d604262eb3e5
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
