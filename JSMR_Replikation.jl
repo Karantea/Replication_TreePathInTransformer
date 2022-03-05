@@ -383,18 +383,73 @@ class REMIFullSongTransformerDataset(): #removed inheritance from torch...DataSe
 
     augmented_bar_events = transpose_events(bar_events, n_keys)
     return augmented_bar_events
+
+  def __len__(self):
+    return len(self.pieces)
+
+  def __getitem__(self, idx):
+    #idx = int(idx) #MR added this
+    #if torch.is_tensor(idx): ###############This had to be excluded, because torch won't install using Conda.jl
+    #  idx = idx.tolist() ########## also, it seems, that this is just converting an index to a scalar, if it comes in as a torch tensor. Let's just make sure, we're only indexing with scalars and we should be fine?!
+    bar_events, st_bar, bar_pos, n_bars = self.get_sample_from_file(idx)
+    if self.do_augment:
+      bar_events = self.pitch_augment(bar_events)
+
+    # print ('poly and rfreq', polyph_cls, rfreq_cls)
+    bar_tokens = convert_event(bar_events, self.event2idx, to_ndarr=False)
+    bar_pos = bar_pos.tolist() + [len(bar_tokens)]
+
+    # print (bar_pos)
+
+    # print ('[no. {:06d}] len: {:4} | last: {}'.format(idx, len(bar_tokens), self.idx2event[ bar_tokens[-1] ]))
+
+    length = len(bar_tokens)
+    if self.pad_to_same:
+      inp = self.pad_sequence(bar_tokens, self.model_dec_seqlen + 1) 
+    else:
+      inp = self.pad_sequence(bar_tokens, len(bar_tokens) + 1, pad_value=self.dec_end_pad_value)
+    target = np.array(inp[1:], dtype=int)
+    inp = np.array(inp[:-1], dtype=int)
+    assert len(inp) == len(target)
+
+    return {
+      'id': idx,
+      #'piece_id': int(self.pieces[idx].split('/')[-1].replace('.pkl', '')),
+      'piece_id': self.pieces[idx].split('/')[-1].replace('.pkl', ''),
+      'st_bar_id': st_bar,
+      'bar_pos': np.array(bar_pos, dtype=int),
+      'dec_input': inp[:self.model_dec_seqlen],
+      'dec_target': target[:self.model_dec_seqlen],
+      'length': min(length, self.model_dec_seqlen)
+    }
+
 """
 	
-test = py"""
-REMIFullSongTransformerDataset(
-'./remi_dataset', './pickles/remi_vocab.pkl', 
-do_augment=True, 
-model_dec_seqlen=train_conf['model']['max_len'], 
-model_max_bars=train_conf['data_loader']['max_bars'],
-pieces=pieces,
-pad_to_same=True)
-	"""
+py"""
+def createDataSet():
+	dset = REMIFullSongTransformerDataset(
+	'./experiments/pop_piano/remi_dataset', './experiments/pop_piano/pickles/remi_vocab.pkl', 
+	do_augment=True, 
+	model_dec_seqlen=train_conf['model']['max_len'], 
+	model_max_bars=train_conf['data_loader']['max_bars'],
+	pieces=pieces,
+	pad_to_same=True)
+	return(dset)
+"""
+testset = py"""createDataSet()"""
 end
+
+# ╔═╡ c382785c-1592-4c04-a5ad-b42d79c50081
+testset
+
+# ╔═╡ d554f69b-4044-413c-ae0a-2f274e5439fa
+testset.vocab_file #yesssss! Now we can access the data in the python object
+
+# ╔═╡ e8f8804e-bf19-4bc6-a8a4-036029f933cf
+testset[3]
+
+# ╔═╡ 7cb9346b-112d-4f4e-a1f7-f2c73cb60698
+testset.pieces[1]
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1171,5 +1226,9 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═ce519af8-a309-49a9-b410-0e84eb6f0d53
 # ╠═ad79f6e0-1d50-4b52-b9e3-c79d97fd98cc
 # ╠═f01df3af-a39d-4e92-af73-b6266a04006c
+# ╠═c382785c-1592-4c04-a5ad-b42d79c50081
+# ╠═d554f69b-4044-413c-ae0a-2f274e5439fa
+# ╠═e8f8804e-bf19-4bc6-a8a4-036029f933cf
+# ╠═7cb9346b-112d-4f4e-a1f7-f2c73cb60698
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
