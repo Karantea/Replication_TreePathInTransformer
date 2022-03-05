@@ -18,7 +18,7 @@ end
 using HypertextLiteral
 
 # ╔═╡ 07ce5c31-bd34-4387-a2f4-356e7066ebe5
-using PyCall #instead of "using Pickle" which is a premade package
+using PyCall #instead of "using Pickle.jl" which is a premade package
 
 # ╔═╡ 8355a74c-de2c-423f-9603-1daae76ed832
 begin
@@ -30,6 +30,10 @@ end
 
 # ╔═╡ a9001bb5-8bca-4923-9f0e-aa7faa2c8e9b
 using Formatting #to be able to use the {:bla} placeholders from Python in the following function
+
+# ╔═╡ cc6d18a8-89af-46a0-bd04-bd170bba0938
+#https://github.com/JuliaPy/Conda.jl#conda-and-pip #it's starting to get ridiculous
+using Conda
 
 # ╔═╡ cdf98e75-65ae-4f57-a5ca-f73aff5e578b
 md""" # Replication of -Stochastic Positional Encoding- 
@@ -85,7 +89,7 @@ load_pickle = py"load_pickle"
 end
 
 # ╔═╡ 3e2e678f-2ab6-4f46-b0f6-cd765494342a
-load_pickle("example.pkl") #from https://zenodo.org/record/4782721/files/remi_dataset.tar.gz?download=1
+load_pickle("./experiments/pop_piano/pickles/train_pieces.pkl") #from https://zenodo.org/record/4782721/files/remi_dataset.tar.gz?download=1
 
 # ╔═╡ 614ab61b-a610-4989-baba-ef06c05087c2
 md"""Loads pickle Files into Julia Dict(s) which have a semi-intuitive structure"""
@@ -165,16 +169,41 @@ md"""### Plugging in REMIFullSongTransformerDataset (class)"""
 # ╔═╡ f0949588-8119-4871-9b11-b15f50c594ba
 md"""We noticed that there is quite complex pre-processing of the data carried out by the REMIFullSongTransformerDataset class from dataloader.py. As this doesn't really have anything to do with replicating the Transformer architecture, we want to run this whole thing in Python (original author's code), receive the resulting complex object in Julia and transfer all the data hiding in those attributes to a Julia object. """
 
+# ╔═╡ e5e98dc9-dacd-4043-90e1-c07b2d0f8fc3
+Conda.list()
+
+# ╔═╡ 83018e58-d562-4b5b-ab8d-9764c7b87075
+Conda.add("numpy")
+
+# ╔═╡ ce519af8-a309-49a9-b410-0e84eb6f0d53
+#doesn't work #Conda.add("pytorch") 
+
+# ╔═╡ ad79f6e0-1d50-4b52-b9e3-c79d97fd98cc
+Conda.add("pyyaml") #took me quite a while to figure out that it was the package name that was wrong "pyyaml" instead of "yaml", grrrr!
+
 # ╔═╡ f01df3af-a39d-4e92-af73-b6266a04006c
+begin
+py"""
+import numpy
+import yaml
+import pickle
+
+train_conf_path = "experiments/pop_piano/configs/train/sinespe_default.yaml"
+train_conf = yaml.load(open(train_conf_path, 'r'), Loader=yaml.FullLoader)
+train_split = train_conf['data_loader']['train_split']
+pieces = pickle.load(open(train_split, 'rb'))
+"""
+
+	
 py"""
 import os, pickle, random
 from glob import glob
 
 #import torch #trying to bluntly exclude the methods that depend on this
 import numpy as np
-import pandas as pd
+#import pandas as pd #aren't even being used D:<
 
-from torch.utils.data import Dataset, DataLoader
+#from torch.utils.data import Dataset, DataLoader
 
 IDX_TO_KEY = {
   0: 'A',
@@ -253,7 +282,7 @@ def convert_event(event_seq, event2idx, to_ndarr=True):
   else:
     return event_seq
 
-class REMIFullSongTransformerDataset(Dataset):
+class REMIFullSongTransformerDataset(): #removed inheritance from torch...DataSet
   def __init__(self, data_dir, vocab_file, 
                model_dec_seqlen=2048, model_max_bars=32,
                pieces=[], do_augment=True, augment_range=range(-6, 7), 
@@ -355,14 +384,23 @@ class REMIFullSongTransformerDataset(Dataset):
     augmented_bar_events = transpose_events(bar_events, n_keys)
     return augmented_bar_events
 """
-
-# ╔═╡ 935e6d49-638f-405b-af46-d604262eb3e5
-
+	
+test = py"""
+REMIFullSongTransformerDataset(
+'./remi_dataset', './pickles/remi_vocab.pkl', 
+do_augment=True, 
+model_dec_seqlen=train_conf['model']['max_len'], 
+model_max_bars=train_conf['data_loader']['max_bars'],
+pieces=pieces,
+pad_to_same=True)
+	"""
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Conda = "8f4d0f93-b110-5947-807f-2305c1781a2d"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 Formatting = "59287772-0a20-5a39-b81b-1366585eb4c0"
 HypertextLiteral = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
@@ -372,10 +410,11 @@ YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [compat]
 CUDA = "~3.8.3"
+Conda = "~1.7.0"
 Flux = "~0.12.9"
 Formatting = "~0.4.2"
 HypertextLiteral = "~0.9.3"
-PyCall = "~1.93.0"
+PyCall = "~1.93.1"
 Transformers = "~0.1.15"
 YAML = "~0.4.7"
 """
@@ -870,9 +909,9 @@ uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 
 [[PyCall]]
 deps = ["Conda", "Dates", "Libdl", "LinearAlgebra", "MacroTools", "Serialization", "VersionParsing"]
-git-tree-sha1 = "71fd4022ecd0c6d20180e23ff1b3e05a143959c2"
+git-tree-sha1 = "1fc929f47d7c151c839c5fc1375929766fb8edcc"
 uuid = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
-version = "1.93.0"
+version = "1.93.1"
 
 [[REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "Unicode"]
@@ -1126,7 +1165,11 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╟─ae902061-d831-4059-ba9e-7319d6370b9d
 # ╟─65e0d912-a36f-45d9-8f5f-741e3a9b7668
 # ╟─f0949588-8119-4871-9b11-b15f50c594ba
+# ╠═cc6d18a8-89af-46a0-bd04-bd170bba0938
+# ╠═e5e98dc9-dacd-4043-90e1-c07b2d0f8fc3
+# ╠═83018e58-d562-4b5b-ab8d-9764c7b87075
+# ╠═ce519af8-a309-49a9-b410-0e84eb6f0d53
+# ╠═ad79f6e0-1d50-4b52-b9e3-c79d97fd98cc
 # ╠═f01df3af-a39d-4e92-af73-b6266a04006c
-# ╠═935e6d49-638f-405b-af46-d604262eb3e5
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
